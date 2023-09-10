@@ -1,34 +1,232 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Document</title>
-</head>
-<body>
-    <input type="file" id="inpFile">
+  </head>
+  <body>
+    <input type="file" id="inpFile" />
     <button type="button" id="btnUpload">Upload</button>
-    <br>
-    <br>
-    <textarea style="width: 300px; height: 150px;" id="resultText" placeholder="Wait its processing"></textarea>
+    <br />
+    <br />
+    <div id="resultContainer">
+      <textarea
+        style="width: 700px; height: 500px"
+        id="resultText"
+        placeholder="Wait its processing"
+      ></textarea>
+      <br />
+      <a href="#" id="downloadLink" style="display: none">Download CSV</a>
+    </div>
     <script>
-        const inpFile = document.getElementById("inpFile");
-        const btnUpload = document.getElementById("btnUpload");
-        const resultText = document.getElementById("resultText");
+      const inpFile = document.getElementById("inpFile");
+      const btnUpload = document.getElementById("btnUpload");
+      const resultText = document.getElementById("resultText");
+      const downloadLink = document.getElementById("downloadLink");
 
-        btnUpload.addEventListener("click", () => {
-            const formData = new FormData();
-            formData.append("pdfFile", inpFile.files[0]);
+      btnUpload.addEventListener("click", () => {
+        const formData = new FormData();
+        formData.append("pdfFile", inpFile.files[0]);
 
-            fetch("/extract-text", {
-                method: "post",
-                body: formData
-            }).then(response => {
-                return response.text();
-            }).then(extractedText => {
-                resultText.value = extractedText;
-            });
+        fetch("/extract-text", {
+          method: "post",
+          body: formData,
+        })
+          .then((response) => {
+            return response.text();
+          })
+          .then((extractedText) => {
+            const formattedData = formatTimetable(extractedText);
+            const timetable = arrayToJason(formattedData);
+            console.log(timetable);
+            //resultText.value = formattedData;
+            resultText.value = timetable;
+
+            // downloadLink.style.display = "block";
+            // downloadLink.href =
+            //   "data:text/csv;charset=utf-8," +
+            //   encodeURIComponent(formattedData);
+            // downloadLink.download = "timetable.csv";
+          });
+      });
+
+      function arrayToJason(text) {
+        // Split the text into a string array using a regular expression to match commas and spaces
+        const stringArray = text.split(/,|\s+/);
+
+        // Filter out empty strings from the array
+        const arr = stringArray.filter((str) => str.trim() !== "");
+
+        console.log(arr);
+
+        const weekDays = [
+          "MONDAY",
+          "TUESDAY",
+          "WEDNESDAY",
+          "THURSDAY",
+          "FRIDAY",
+          "SATURDAY",
+        ];
+        let timeTable = {
+          MONDAY: [],
+          TUESDAY: [],
+          WEDNESDAY: [],
+          THURSDAY: [],
+          FRIDAY: [],
+          SATURDAY: [],
+        };
+        //let timeTable= {}
+        let isSubject = true;
+        let timeData = [];
+        let roomNo = "";
+        let subject = "";
+        let section = "";
+        let i = 0;
+        const myRegex = /#\d+/;
+        const regexPattern = /^#(\d+)$/;
+        arr.forEach((element) => {
+          if (weekDays.includes(element)) {
+            if (i == 0) {
+              i++;
+            } else {
+              timeTable[weekDays[i - 1]] = timeData;
+              timeData = [];
+              i++;
+            }
+          } else {
+            if (isSubject) {
+              subject = element;
+              isSubject = false;
+            } else if (!myRegex.test(element) && !isSubject) {
+              section = element;
+            } else {
+              roomNo = element.replace(regexPattern, "$1");
+              isSubject = true;
+              let obj = {
+                subject: subject,
+                roomNo: roomNo,
+                section: section,
+              };
+              timeData.push(obj);
+              section = "";
+            }
+          }
         });
+        //console.log(timeTable);
+        return timeTable;
+      }
+
+      function formatTimetable(inputString) {
+        inputString = removeZoomMeetings(inputString);
+        inputString = combineLinesWithoutHashtag(inputString);
+        // Split the input data into lines
+        const lines = inputString.split("\n");
+        let formattedData = "";
+
+        for (let i = 0; i < lines.length; i++) {
+          const trimmedLine = lines[i].trim();
+          if (trimmedLine === "") {
+            // Skip empty lines
+            continue;
+          } else if (
+            trimmedLine.startsWith("MONDAY") ||
+            trimmedLine.startsWith("TUESDAY") ||
+            trimmedLine.startsWith("WEDNESDAY") ||
+            trimmedLine.startsWith("THURSDAY") ||
+            trimmedLine.startsWith("FRIDAY") ||
+            trimmedLine.startsWith("SATURDAY")
+          ) {
+            // Format the day of the week
+            formattedData += trimmedLine + "\n\n";
+          } else if (
+            trimmedLine === "Consultancy Hours" ||
+            trimmedLine === "LUNCH"
+          ) {
+            // Create a new line after "Consultancy Hours" and "LUNCH"
+            formattedData += trimmedLine + "\n\n";
+          } else {
+            // Format other subjects
+            if (
+              i > 0 &&
+              lines[i - 1].trim() !== "Consultancy Hours" &&
+              lines[i - 1].trim() !== "LUNCH"
+            ) {
+              // Add a newline character if the previous line was not "Consultancy Hours" or "LUNCH"
+              formattedData += "\n";
+            }
+            formattedData += trimmedLine + "\n";
+          }
+        }
+
+        return formattedData;
+      }
+      function removeZoomMeetings(inputString) {
+        inputString = inputString.replace(/ZOOM MEETING/g, "");
+        inputString = inputString.replace(/ZOOM/g, "");
+        inputString = inputString.replace(/MEETING/g, "");
+
+        inputString = inputString.replace(
+          /Consultancy Hours/g,
+          "Consultancy #0\n"
+        );
+        inputString = inputString.replace(/Consultancy\n/g, "Consultancy #0\n");
+        inputString = inputString.replace(/-ENG-LAB/g, "");
+        inputString = inputString.replace(/PROGRAMMING LAB/g, "");
+        inputString = inputString.replace(/(A) ENG LAB/g, "");
+
+        inputString = inputString.replace(/Hours/g, "");
+        inputString = inputString.replace(/LUNCH/g, "LUNCH #0\n");
+        inputString = inputString.replace(/MONDAY/g, "MONDAY\n,");
+        inputString = inputString.replace(/TUESDAY/g, "TUESDAY\n,");
+        inputString = inputString.replace(/WEDNESDAY/g, "WEDNESDAY\n,");
+        inputString = inputString.replace(/THURSDAY/g, "THURSDAY\n,");
+        inputString = inputString.replace(/FRIDAY/g, "FRIDAY\n,");
+        inputString = inputString.replace(/SATURDAY/g, "SATURDAY\n,");
+
+        return inputString;
+      }
+      function combineLinesWithoutHashtag(inputString) {
+        const lines = inputString.split("\n");
+        let combinedString = "";
+        let shouldCombine = false;
+
+        for (let i = 0; i < lines.length; i++) {
+          const currentLine = lines[i];
+          const nextLine = lines[i + 1];
+
+          if (currentLine && nextLine) {
+            if (currentLine.includes("#")) {
+              combinedString += currentLine + "\n";
+              shouldCombine = false;
+            } else {
+              if (shouldCombine) {
+                combinedString += currentLine + " " + nextLine + "\n";
+                i++; // Skip the next line since it's combined
+              } else {
+                combinedString += currentLine + "\n";
+              }
+              shouldCombine =
+                !currentLine.includes("#") && !nextLine.includes("#");
+            }
+          } else {
+            combinedString += currentLine + "\n";
+          }
+        }
+
+        return trimData(combinedString);
+      }
+
+      function trimData(inputString) {
+        // Find the first occurrence of "MONDAY"
+        const startIndex = inputString.indexOf("MONDAY");
+
+        // Find the last occurrence of "Consultancy Hours"
+        const endIndex = inputString.lastIndexOf("Consultancy");
+
+        // Extract the trimmed data
+        return inputString.substring(startIndex, endIndex + 17); // Add 17 characters to include "Consultancy Hours"
+      }
     </script>
-</body>
+  </body>
 </html>
